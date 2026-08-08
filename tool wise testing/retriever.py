@@ -6,6 +6,7 @@ from langsmith import traceable
 
 from config import Config
 from models import ModelPool
+from cache import QueryEmbeddingCache, ResultCache
 
 
 @dataclass
@@ -19,19 +20,36 @@ class CampusLifeRetriever:
     """
     Production retriever for the campus_life_info tool.
 
-    Pipeline:
+    Pipeline (cache miss):
         Query
             ↓
-        Embed (BGE)
+        [L2 Result Cache miss]
+            ↓
+        [L1 Embedding Cache miss] → Embed (BGE) → store in L1
             ↓
         Qdrant ANN Search
             ↓
         CrossEncoder Rerank
             ↓
-        Return Top-K
+        Store in L2 → Return Top-K
+
+    Pipeline (L2 hit – fastest path):
+        Query → L2 hit → Return cached results  (~0 ms)
+
+    Pipeline (L1 hit only):
+        Query → L2 miss → L1 hit → Qdrant + Rerank → store in L2 → Return
     """
 
     _client = None
+
+    # ------------------------------------------------------------------
+    # Shared cache instances (process-level singletons)
+    # ------------------------------------------------------------------
+
+    _embed_cache = QueryEmbeddingCache(maxsize=Config.EMBED_CACHE_MAXSIZE)
+    _result_cache = ResultCache(
+        ttl_seconds=Config.RESULT_CACHE_TTL_SECONDS,
+    )
 
     @classmethod
     def client(cls):
@@ -47,6 +65,14 @@ class CampusLifeRetriever:
 
         return cls._client
 
+    @classmethod
+    def cache_stats(cls) -> dict:
+        """Return hit-rate statistics for both cache layers."""
+        return {
+            "embed_cache": cls._embed_cache.stats,
+            "result_cache": cls._result_cache.stats,
+        }
+
     @traceable(name="qdrant_retrieve_and_rerank")
     def search(
         self,
@@ -56,15 +82,26 @@ class CampusLifeRetriever:
     ) -> list[RetrievedChunk]:
 
         # -------------------------------------------------
-        # 1. Embed Query
+        # L2 – Full Result Cache (fastest path)
+        # -------------------------------------------------
+
+        cached_result = self._result_cache.get(query, k, rerank)
+        if cached_result is not None:
+            return cached_result
+
+        # -------------------------------------------------
+        # 1. Embed Query  (L1 – Embedding Cache)
         # -------------------------------------------------
 
         embedder = ModelPool.embedder()
 
-        query_vector = embedder.encode(
-            Config.BGE_QUERY_PREFIX + query,
-            normalize_embeddings=True,
-        ).tolist()
+        query_vector = self._embed_cache.get(query)
+        if query_vector is None:
+            query_vector = embedder.encode(
+                Config.BGE_QUERY_PREFIX + query,
+                normalize_embeddings=True,
+            ).tolist()
+            self._embed_cache.set(query, query_vector)
 
         # -------------------------------------------------
         # 2. Dense Search (Qdrant)
@@ -80,6 +117,8 @@ class CampusLifeRetriever:
         hits = response.points
 
         if not hits:
+            # Cache the empty result so we don't hammer Qdrant again
+            self._result_cache.set(query, k, rerank, [])
             return []
 
         texts = []
@@ -113,7 +152,7 @@ class CampusLifeRetriever:
 
             order = np.argsort(-np.asarray(scores))
 
-            return [
+            results = [
                 RetrievedChunk(
                     text=texts[i],
                     score=float(scores[i]),
@@ -126,13 +165,16 @@ class CampusLifeRetriever:
                 for i in order[:k]
             ]
 
+            self._result_cache.set(query, k, rerank, results)
+            return results
+
         # -------------------------------------------------
         # 4. Without Reranking
         # -------------------------------------------------
 
         order = np.argsort(-np.asarray(dense_scores))
 
-        return [
+        results = [
             RetrievedChunk(
                 text=texts[i],
                 score=float(dense_scores[i]),
@@ -144,3 +186,6 @@ class CampusLifeRetriever:
             )
             for i in order[:k]
         ]
+
+        self._result_cache.set(query, k, rerank, results)
+        return results

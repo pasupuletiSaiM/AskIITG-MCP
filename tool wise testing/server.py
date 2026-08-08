@@ -4,6 +4,7 @@ from langsmith import traceable
 from config import Config
 from retriever import CampusLifeRetriever
 from observe import observe
+from models import ModelPool
 
 
 mcp = FastMCP(

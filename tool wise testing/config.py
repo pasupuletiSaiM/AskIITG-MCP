@@ -32,6 +32,19 @@ class Config:
     DEFAULT_K = 5
     CANDIDATES = 20
 
+    #------------------------ Cache ------------------------
+
+    # L1: query-embedding cache (in-memory, deterministic, no TTL needed)
+    EMBED_CACHE_MAXSIZE = 512
+
+    # L2: full result cache (Upstash Redis)
+    RESULT_CACHE_MAXSIZE = 256
+    RESULT_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+    # Upstash Redis
+    UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL")
+    UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+
     #------------------------ logfire ------------------------
 
     LOGFIRE_TOKEN = os.getenv("LOGFIRE_TOKEN")
