@@ -41,6 +41,10 @@ class Config:
     RESULT_CACHE_MAXSIZE = 256
     RESULT_CACHE_TTL_SECONDS = 300  # 5 minutes
 
+    # L3: semantic result cache (local cosine-similarity index → Redis)
+    SEMANTIC_CACHE_MAXSIZE = 256
+    SEMANTIC_CACHE_THRESHOLD = 0.92  # cosine similarity threshold (0–1)
+
     # Upstash Redis
     UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL")
     UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")

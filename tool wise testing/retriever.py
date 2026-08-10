@@ -6,7 +6,7 @@ from langsmith import traceable
 
 from config import Config
 from models import ModelPool
-from cache import QueryEmbeddingCache, ResultCache
+from cache import QueryEmbeddingCache, ResultCache, SemanticCache
 
 
 @dataclass
@@ -50,6 +50,10 @@ class CampusLifeRetriever:
     _result_cache = ResultCache(
         ttl_seconds=Config.RESULT_CACHE_TTL_SECONDS,
     )
+    _semantic_cache = SemanticCache(
+        similarity_threshold=Config.SEMANTIC_CACHE_THRESHOLD,
+        maxsize=Config.SEMANTIC_CACHE_MAXSIZE,
+    )
 
     @classmethod
     def client(cls):
@@ -67,10 +71,11 @@ class CampusLifeRetriever:
 
     @classmethod
     def cache_stats(cls) -> dict:
-        """Return hit-rate statistics for both cache layers."""
+        """Return hit-rate statistics for all cache layers."""
         return {
-            "embed_cache": cls._embed_cache.stats,
-            "result_cache": cls._result_cache.stats,
+            "embed_cache":    cls._embed_cache.stats,
+            "result_cache":   cls._result_cache.stats,
+            "semantic_cache": cls._semantic_cache.stats,
         }
 
     @traceable(name="qdrant_retrieve_and_rerank")
@@ -102,6 +107,14 @@ class CampusLifeRetriever:
                 normalize_embeddings=True,
             ).tolist()
             self._embed_cache.set(query, query_vector)
+
+        # -------------------------------------------------
+        # L3 – Semantic Cache
+        # -------------------------------------------------
+
+        semantic_result = self._semantic_cache.get(query_vector, k, rerank)
+        if semantic_result is not None:
+            return semantic_result
 
         # -------------------------------------------------
         # 2. Dense Search (Qdrant)
@@ -166,6 +179,7 @@ class CampusLifeRetriever:
             ]
 
             self._result_cache.set(query, k, rerank, results)
+            self._semantic_cache.register(query_vector, query, k, rerank)
             return results
 
         # -------------------------------------------------
@@ -188,4 +202,5 @@ class CampusLifeRetriever:
         ]
 
         self._result_cache.set(query, k, rerank, results)
+        self._semantic_cache.register(query_vector, query, k, rerank)
         return results
