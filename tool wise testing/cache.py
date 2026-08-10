@@ -24,14 +24,16 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import threading
-import time
 from collections import OrderedDict
 from typing import Any, Optional
 
 from upstash_redis import Redis
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -181,8 +183,9 @@ class ResultCache:
     def get(self, query: str, k: int, rerank: bool) -> Optional[list]:
         try:
             raw = self._redis.get(self._key(query, k, rerank))
-        except Exception:
-            # Redis unavailable — degrade gracefully, don't crash
+        except Exception as e:
+            # Redis unavailable — degrade gracefully, log for visibility
+            logger.warning("ResultCache GET failed (degrading to miss): %s", e)
             raw = None
 
         with self._lock:

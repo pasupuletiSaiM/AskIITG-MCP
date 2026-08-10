@@ -157,9 +157,9 @@ class CampusLifeRetriever:
                     text=texts[i],
                     score=float(scores[i]),
                     metadata={
-                        k: v
-                        for k, v in payloads[i].items()
-                        if k != "text"
+                        key: v
+                        for key, v in payloads[i].items()
+                        if key != "text"
                     },
                 )
                 for i in order[:k]
@@ -179,9 +179,9 @@ class CampusLifeRetriever:
                 text=texts[i],
                 score=float(dense_scores[i]),
                 metadata={
-                    k: v
-                    for k, v in payloads[i].items()
-                    if k != "text"
+                    key: v
+                    for key, v in payloads[i].items()
+                    if key != "text"
                 },
             )
             for i in order[:k]
